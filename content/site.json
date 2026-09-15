@@ -6,7 +6,7 @@
     "phone": "+32 000 00 00 00"
   },
   "hero": {
-    "eyebrow": "Ontwerp · realisatie · opvolging",
+    "eyebrow": "Ontwerp · realisatie · opvolging enz",
     "title": "Een heldere website voor een sterk lokaal merk.",
     "text": "Een flexibele voorbeeldsite die toont hoe tekst, diensten, projecten en contact samen één overtuigend verhaal vormen.",
     "primaryLabel": "Plan een gesprek",
@@ -18,9 +18,21 @@
     "text": "Wij combineren korte lijnen met een doordachte aanpak. Van het eerste idee tot de laatste afwerking weet je steeds waar je staat."
   },
   "services": [
-    { "number": "01", "title": "Strategie", "text": "We brengen doelen, doelgroep en inhoud terug tot een helder plan." },
-    { "number": "02", "title": "Uitvoering", "text": "We bouwen zorgvuldig, snel en met aandacht voor ieder detail." },
-    { "number": "03", "title": "Opvolging", "text": "Na de lancering blijven we bereikbaar voor groei en verbetering." }
+    {
+      "number": "01",
+      "title": "Strategie",
+      "text": "We brengen doelen, doelgroep en inhoud terug tot een helder plan."
+    },
+    {
+      "number": "02",
+      "title": "Uitvoering",
+      "text": "We bouwen zorgvuldig, snel en met aandacht voor ieder detail."
+    },
+    {
+      "number": "03",
+      "title": "Opvolging",
+      "text": "Na de lancering blijven we bereikbaar voor groei en verbetering."
+    }
   ],
   "project": {
     "eyebrow": "Uitgelicht project",
