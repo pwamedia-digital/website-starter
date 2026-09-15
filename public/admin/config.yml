@@ -1,0 +1,65 @@
+backend:
+  name: github
+  repo: pwamedia-digital/website-starter
+  branch: main
+  auth_methods: [token]
+
+locale: nl
+media_folder: public/uploads
+public_folder: /uploads
+
+collections:
+  - name: website
+    label: Website
+    files:
+      - name: inhoud
+        label: Website-inhoud
+        file: content/site.json
+        format: json
+        fields:
+          - label: Bedrijfsgegevens
+            name: company
+            widget: object
+            fields:
+              - { label: Bedrijfsnaam, name: name, widget: string }
+              - { label: Korte slogan, name: tagline, widget: string }
+              - { label: E-mailadres, name: email, widget: string }
+              - { label: Telefoon, name: phone, widget: string }
+          - label: Openingsblok
+            name: hero
+            widget: object
+            fields:
+              - { label: Bovenregel, name: eyebrow, widget: string }
+              - { label: Grote titel, name: title, widget: string }
+              - { label: Introductietekst, name: text, widget: text }
+              - { label: Eerste knop, name: primaryLabel, widget: string }
+              - { label: Tweede knop, name: secondaryLabel, widget: string }
+          - label: Over ons
+            name: intro
+            widget: object
+            fields:
+              - { label: Bovenregel, name: eyebrow, widget: string }
+              - { label: Titel, name: title, widget: string }
+              - { label: Tekst, name: text, widget: text }
+          - label: Diensten
+            name: services
+            widget: list
+            summary: '{{fields.number}} — {{fields.title}}'
+            fields:
+              - { label: Nummer, name: number, widget: string }
+              - { label: Titel, name: title, widget: string }
+              - { label: Tekst, name: text, widget: text }
+          - label: Uitgelicht project
+            name: project
+            widget: object
+            fields:
+              - { label: Bovenregel, name: eyebrow, widget: string }
+              - { label: Titel, name: title, widget: string }
+              - { label: Tekst, name: text, widget: text }
+          - label: Contactblok
+            name: contact
+            widget: object
+            fields:
+              - { label: Bovenregel, name: eyebrow, widget: string }
+              - { label: Titel, name: title, widget: string }
+              - { label: Tekst, name: text, widget: text }
