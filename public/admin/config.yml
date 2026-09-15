@@ -4,7 +4,6 @@ backend:
   branch: main
   auth_methods: [token]
 
-locale: nl
 media_folder: public/uploads
 public_folder: /uploads
 
