@@ -1,7 +1,16 @@
 import { ArrowDownRight, ArrowUpRight, Mail, Menu, Phone } from 'lucide-react'
+import Image from 'next/image'
 import site from '@/content/site.json'
 
+type ManagedImage = { src: string; original?: string; alt: string }
+type SiteWithImages = typeof site & {
+  hero: typeof site.hero & { image?: ManagedImage }
+  intro: typeof site.intro & { image?: ManagedImage }
+  project: typeof site.project & { image?: ManagedImage }
+}
+
 export default function Home() {
+  const content = site as SiteWithImages
   return (
     <main>
       <header className="site-header shell">
@@ -36,7 +45,9 @@ export default function Home() {
             <a className="button button-ghost" href="#project">{site.hero.secondaryLabel}</a>
           </div>
         </div>
-        <div className="hero-panel" aria-label="Voorbeeld van een flexibel websiteblok">
+        <div className={`hero-panel ${content.hero.image?.src ? 'has-image' : ''}`} aria-label={content.hero.image?.alt || 'Voorbeeld van een flexibel websiteblok'}>
+          {content.hero.image?.src && <Image className="hero-panel-image" src={content.hero.image.src} alt={content.hero.image.alt} fill priority sizes="(max-width: 800px) calc(100vw - 30px), 280px" />}
+          {content.hero.image?.src && <span className="image-shade" aria-hidden="true" />}
           <div className="panel-number">01</div>
           <div className="panel-copy"><span>Doordacht digitaal</span><strong>{site.company.tagline}</strong></div>
         </div>
@@ -47,10 +58,11 @@ export default function Home() {
       </div>
 
       <section className="intro shell section" id="over">
-        <p className="eyebrow">{site.intro.eyebrow}</p>
-        <div className="intro-grid">
-          <h2>{site.intro.title}</h2>
-          <p>{site.intro.text}</p>
+        <p className="eyebrow">{content.intro.eyebrow}</p>
+        <div className={`intro-grid ${content.intro.image?.src ? 'has-image' : ''}`}>
+          {content.intro.image?.src && <div className="intro-image"><Image src={content.intro.image.src} alt={content.intro.image.alt} fill sizes="(max-width: 800px) calc(100vw - 30px), 48vw" /></div>}
+          <h2>{content.intro.title}</h2>
+          <p>{content.intro.text}</p>
         </div>
       </section>
 
@@ -71,7 +83,7 @@ export default function Home() {
       </section>
 
       <section className="project shell section" id="project">
-        <div className="project-visual"><span>Case study</span><strong>2026</strong></div>
+        <div className={`project-visual ${content.project.image?.src ? 'has-image' : ''}`}>{content.project.image?.src ? <Image src={content.project.image.src} alt={content.project.image.alt} fill sizes="(max-width: 800px) calc(100vw - 30px), 52vw" /> : <><span>Case study</span><strong>2026</strong></>}</div>
         <div className="project-copy">
           <p className="eyebrow">{site.project.eyebrow}</p>
           <h2>{site.project.title}</h2>
