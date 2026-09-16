@@ -21,7 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Cropper, { type ReactCropperElement } from 'react-cropper'
 
 type Service = { number: string; title: string; text: string }
-type ManagedImage = { src: string; original: string; alt: string }
+type ManagedImage = { src: string; original: string; alt: string; preview?: string; originalPreview?: string }
 type SiteContent = {
   company: { name: string; tagline: string; email: string; phone: string }
   hero: { eyebrow: string; title: string; text: string; primaryLabel: string; secondaryLabel: string; image?: ManagedImage }
@@ -53,6 +53,16 @@ const blocks: { key: BlockKey; number: string; title: string; description: strin
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 
+function withoutImagePreviews(value: SiteContent) {
+  const next = clone(value)
+  ;(['hero', 'intro', 'project'] as ImageTarget[]).forEach((target) => {
+    if (!next[target].image) return
+    delete next[target].image.preview
+    delete next[target].image.originalPreview
+  })
+  return next
+}
+
 function decodeBase64(value: string) {
   const binary = atob(value.replace(/\n/g, ''))
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
@@ -81,27 +91,50 @@ function canvasToBlob(canvas: HTMLCanvasElement, quality = .88) {
   })
 }
 
-function CmsImage({ src, alt = '', className }: { src: string; alt?: string; className?: string }) {
+function CmsImage({ src, token, alt = '', className }: { src: string; token: string; alt?: string; className?: string }) {
+  const [resolvedSrc, setResolvedSrc] = useState(src)
   const [attempt, setAttempt] = useState(0)
   const retryTimer = useRef<number | null>(null)
+  const recovering = useRef(false)
 
   useEffect(() => {
+    setResolvedSrc(src)
     setAttempt(0)
+    recovering.current = false
     return () => {
       if (retryTimer.current) window.clearTimeout(retryTimer.current)
     }
   }, [src])
 
-  const retry = () => {
+  const retry = async () => {
+    if (src.startsWith('/uploads/') && token && !recovering.current) {
+      recovering.current = true
+      try {
+        const response = await fetch(`https://api.github.com/repos/${REPOSITORY}/contents/public${src}?ref=${BRANCH}`, {
+          headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28' },
+        })
+        if (response.ok) {
+          const file = await response.json() as { content: string }
+          setResolvedSrc(`data:image/webp;base64,${file.content.replace(/\n/g, '')}`)
+          return
+        }
+      } catch {
+        // De automatische herhaling hieronder vangt een tijdelijke netwerkfout op.
+      } finally {
+        recovering.current = false
+      }
+    }
     if (attempt >= 20 || retryTimer.current) return
     retryTimer.current = window.setTimeout(() => {
       retryTimer.current = null
+      setResolvedSrc(src)
       setAttempt((value) => value + 1)
     }, 3000)
   }
 
-  const separator = src.includes('?') ? '&' : '?'
-  return <img className={className} src={`${src}${separator}cmsRetry=${attempt}`} alt={alt} onError={retry} />
+  const separator = resolvedSrc.includes('?') ? '&' : '?'
+  const displaySrc = resolvedSrc.startsWith('data:') || resolvedSrc.startsWith('blob:') ? resolvedSrc : `${resolvedSrc}${separator}cmsRetry=${attempt}`
+  return <img className={className} src={displaySrc} alt={alt} onError={() => { void retry() }} />
 }
 
 async function makeOriginal(image: HTMLImageElement, rotation: number) {
@@ -132,7 +165,7 @@ function ImageCropper({ token, label, slug, aspect, ratioLabel, existingImage, o
 }) {
   const cropperRef = useRef<ReactCropperElement>(null)
   const objectUrlRef = useRef('')
-  const [source, setSource] = useState(existingImage?.original ? `${existingImage.original}?cmsCrop=${Date.now()}` : '')
+  const [source, setSource] = useState(existingImage?.originalPreview || (existingImage?.original ? `${existingImage.original}?cmsCrop=${Date.now()}` : ''))
   const [zoom, setZoom] = useState(1)
   const [minZoom, setMinZoom] = useState(.1)
   const [rotation, setRotation] = useState(0)
@@ -182,7 +215,13 @@ function ImageCropper({ token, label, slug, aspect, ratioLabel, existingImage, o
       const [cropBase64, originalBase64] = await Promise.all([blobToBase64(cropBlob), blobToBase64(originalBlob)])
       await upload(`public/uploads/${originalName}`, originalBase64, `Bewaar originele foto voor ${label}`)
       await upload(`public/uploads/${croppedName}`, cropBase64, `Bewaar uitsnede voor ${label}`)
-      onComplete({ src: `/uploads/${croppedName}`, original: `/uploads/${originalName}`, alt: alt.trim() })
+      onComplete({
+        src: `/uploads/${croppedName}`,
+        original: `/uploads/${originalName}`,
+        alt: alt.trim(),
+        preview: `data:image/webp;base64,${cropBase64}`,
+        originalPreview: `data:image/webp;base64,${originalBase64}`,
+      })
       onClose()
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'De foto kon niet worden opgeslagen.') }
     finally { setUploading(false) }
@@ -250,8 +289,9 @@ function ImageCropper({ token, label, slug, aspect, ratioLabel, existingImage, o
   )
 }
 
-function ImageField({ image, label, ratioLabel, onEdit, onRemove, onAltChange }: {
+function ImageField({ image, token, label, ratioLabel, onEdit, onRemove, onAltChange }: {
   image?: ManagedImage
+  token: string
   label: string
   ratioLabel: string
   onEdit: () => void
@@ -261,7 +301,7 @@ function ImageField({ image, label, ratioLabel, onEdit, onRemove, onAltChange }:
   return (
     <div className="image-field">
       <div className="image-field-heading"><div><strong>{label}</strong><span>Aanbevolen uitsnede: {ratioLabel}</span></div>{image?.src && <button className="remove-image" onClick={onRemove}><Trash2 size={15} /> Verwijderen</button>}</div>
-      {image?.src ? <><div className="current-image"><CmsImage src={image.src} alt="" /><button onClick={onEdit}><ImagePlus size={17} /> Foto vervangen of opnieuw uitsnijden</button></div><TextField label="Beschrijving voor toegankelijkheid" value={image.alt} onChange={onAltChange} /></> : <button className="add-image" onClick={onEdit}><ImagePlus size={22} /><span><strong>Foto toevoegen</strong><small>Uploaden, zoomen en uitsnijden</small></span></button>}
+      {image?.src ? <><div className="current-image"><CmsImage src={image.preview || image.src} token={token} alt="" /><button onClick={onEdit}><ImagePlus size={17} /> Foto vervangen of opnieuw uitsnijden</button></div><TextField label="Beschrijving voor toegankelijkheid" value={image.alt} onChange={onAltChange} /></> : <button className="add-image" onClick={onEdit}><ImagePlus size={22} /><span><strong>Foto toevoegen</strong><small>Uploaden, zoomen en uitsnijden</small></span></button>}
     </div>
   )
 }
@@ -307,18 +347,18 @@ function Login({ onLogin }: { onLogin: (token: string) => void }) {
   )
 }
 
-function SitePreview({ site, viewport }: { site: SiteContent; viewport: Viewport }) {
+function SitePreview({ site, viewport, token }: { site: SiteContent; viewport: Viewport; token: string }) {
   return (
     <div className={`cms-site-preview ${viewport}`}>
       <div className="preview-site-header"><strong>{site.company.name}</strong><span>Over ons&nbsp;&nbsp; Diensten&nbsp;&nbsp; Project&nbsp;&nbsp; Contact</span></div>
       <section className="preview-hero">
         <div><small>{site.hero.eyebrow}</small><h1>{site.hero.title}</h1><p>{site.hero.text}</p><button>{site.hero.primaryLabel}</button></div>
-        <aside className={site.hero.image?.src ? 'with-image' : ''}>{site.hero.image?.src && <CmsImage src={site.hero.image.src} />}<b>01</b><strong>{site.company.tagline}</strong></aside>
+        <aside className={site.hero.image?.src ? 'with-image' : ''}>{site.hero.image?.src && <CmsImage src={site.hero.image.preview || site.hero.image.src} token={token} />}<b>01</b><strong>{site.company.tagline}</strong></aside>
       </section>
       <div className="preview-ticker">STRATEGIE • ONTWERP • ONTWIKKELING • OPVOLGING</div>
-      <section className={`preview-intro ${site.intro.image?.src ? 'with-image' : ''}`}>{site.intro.image?.src && <CmsImage src={site.intro.image.src} />}<div><small>{site.intro.eyebrow}</small><h2>{site.intro.title}</h2><p>{site.intro.text}</p></div></section>
+      <section className={`preview-intro ${site.intro.image?.src ? 'with-image' : ''}`}>{site.intro.image?.src && <CmsImage src={site.intro.image.preview || site.intro.image.src} token={token} />}<div><small>{site.intro.eyebrow}</small><h2>{site.intro.title}</h2><p>{site.intro.text}</p></div></section>
       <section className="preview-services"><small>ONZE AANPAK</small><h2>Van richting naar resultaat.</h2>{site.services.map((service) => <div key={service.number}><b>{service.number}</b><strong>{service.title}</strong><span>{service.text}</span></div>)}</section>
-      <section className="preview-project"><div className={site.project.image?.src ? 'with-image' : ''}>{site.project.image?.src ? <CmsImage src={site.project.image.src} /> : 'CASE STUDY'}</div><article><small>{site.project.eyebrow}</small><h2>{site.project.title}</h2><p>{site.project.text}</p></article></section>
+      <section className="preview-project"><div className={site.project.image?.src ? 'with-image' : ''}>{site.project.image?.src ? <CmsImage src={site.project.image.preview || site.project.image.src} token={token} /> : 'CASE STUDY'}</div><article><small>{site.project.eyebrow}</small><h2>{site.project.title}</h2><p>{site.project.text}</p></article></section>
       <section className="preview-contact"><small>{site.contact.eyebrow}</small><h2>{site.contact.title}</h2><p>{site.contact.text}</p><strong>{site.company.email}<br />{site.company.phone}</strong></section>
     </div>
   )
@@ -401,25 +441,26 @@ export default function AdminEditor() {
     if (!site || !staged) return
     const next = clone(staged)
     ;(next[key] as SiteContent[BlockKey]) = clone(site[key]) as SiteContent[BlockKey]
-    setStaged(next); localStorage.setItem(DRAFT_KEY, JSON.stringify(next)); setNotice(`${blocks.find((block) => block.key === key)?.title} is opgeslagen.`)
+    setStaged(next); localStorage.setItem(DRAFT_KEY, JSON.stringify(withoutImagePreviews(next))); setNotice(`${blocks.find((block) => block.key === key)?.title} is opgeslagen.`)
   }
 
   const dirtyBlocks = useMemo(() => !site || !staged ? [] : blocks.filter((block) => !equal(site[block.key], staged[block.key])).map((block) => block.key), [site, staged])
-  const hasDraftChanges = useMemo(() => !!staged && !!published && !equal(staged, published), [staged, published])
+  const hasDraftChanges = useMemo(() => !!staged && !!published && !equal(withoutImagePreviews(staged), published), [staged, published])
   const canPublish = !!site && dirtyBlocks.length === 0 && hasDraftChanges && !publishing
 
   const publish = async () => {
     if (!canPublish || !staged) return
     setPublishing(true); setError(''); setNotice('')
     try {
+      const publishable = withoutImagePreviews(staged)
       const response = await fetch(`https://api.github.com/repos/${REPOSITORY}/contents/${CONTENT_PATH}`, {
         method: 'PUT',
         headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-GitHub-Api-Version': '2022-11-28' },
-        body: JSON.stringify({ message: 'Publiceer website-inhoud via PWAMEDIA CMS', content: encodeBase64(`${JSON.stringify(staged, null, 2)}\n`), sha: contentSha, branch: BRANCH }),
+        body: JSON.stringify({ message: 'Publiceer website-inhoud via PWAMEDIA CMS', content: encodeBase64(`${JSON.stringify(publishable, null, 2)}\n`), sha: contentSha, branch: BRANCH }),
       })
       if (!response.ok) throw new Error('Publiceren is niet gelukt. Herlaad de pagina en probeer opnieuw.')
       const result = await response.json() as { content: { sha: string } }
-      setContentSha(result.content.sha); setPublished(clone(staged)); setSite(clone(staged)); setPast([]); setFuture([])
+      setContentSha(result.content.sha); setPublished(clone(publishable)); setSite(clone(staged)); setPast([]); setFuture([])
       localStorage.removeItem(DRAFT_KEY); setNotice('Gepubliceerd. Vercel zet de nieuwe inhoud nu online.')
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Publiceren is niet gelukt.') }
     finally { setPublishing(false) }
@@ -456,10 +497,10 @@ export default function AdminEditor() {
                 {openBlock === block.key && (
                   <div className="cms-block-body">
                     {block.key === 'company' && <div className="field-grid"><TextField label="Bedrijfsnaam" value={site.company.name} onChange={(value) => updateSite((next) => { next.company.name = value })} /><TextField label="Korte slogan" value={site.company.tagline} onChange={(value) => updateSite((next) => { next.company.tagline = value })} /><TextField label="E-mailadres" value={site.company.email} onChange={(value) => updateSite((next) => { next.company.email = value })} /><TextField label="Telefoonnummer" value={site.company.phone} onChange={(value) => updateSite((next) => { next.company.phone = value })} /></div>}
-                    {block.key === 'hero' && <><ImageField image={site.hero.image} label="Openingsfoto" ratioLabel="4:5 staand" onEdit={() => setCropTarget('hero')} onRemove={() => setManagedImage('hero')} onAltChange={(value) => updateSite((next) => { if (next.hero.image) next.hero.image.alt = value })} /><TextField label="Kleine bovenregel" value={site.hero.eyebrow} onChange={(value) => updateSite((next) => { next.hero.eyebrow = value })} /><TextField label="Grote titel" value={site.hero.title} onChange={(value) => updateSite((next) => { next.hero.title = value })} multiline /><TextField label="Introductietekst" value={site.hero.text} onChange={(value) => updateSite((next) => { next.hero.text = value })} multiline /><div className="field-grid"><TextField label="Eerste knop" value={site.hero.primaryLabel} onChange={(value) => updateSite((next) => { next.hero.primaryLabel = value })} /><TextField label="Tweede knop" value={site.hero.secondaryLabel} onChange={(value) => updateSite((next) => { next.hero.secondaryLabel = value })} /></div></>}
-                    {block.key === 'intro' && <><ImageField image={site.intro.image} label="Foto bij Over ons" ratioLabel="16:9 breed" onEdit={() => setCropTarget('intro')} onRemove={() => setManagedImage('intro')} onAltChange={(value) => updateSite((next) => { if (next.intro.image) next.intro.image.alt = value })} /><TextField label="Kleine bovenregel" value={site.intro.eyebrow} onChange={(value) => updateSite((next) => { next.intro.eyebrow = value })} /><TextField label="Titel" value={site.intro.title} onChange={(value) => updateSite((next) => { next.intro.title = value })} multiline /><TextField label="Tekst" value={site.intro.text} onChange={(value) => updateSite((next) => { next.intro.text = value })} multiline /></>}
+                    {block.key === 'hero' && <><ImageField image={site.hero.image} token={token} label="Openingsfoto" ratioLabel="4:5 staand" onEdit={() => setCropTarget('hero')} onRemove={() => setManagedImage('hero')} onAltChange={(value) => updateSite((next) => { if (next.hero.image) next.hero.image.alt = value })} /><TextField label="Kleine bovenregel" value={site.hero.eyebrow} onChange={(value) => updateSite((next) => { next.hero.eyebrow = value })} /><TextField label="Grote titel" value={site.hero.title} onChange={(value) => updateSite((next) => { next.hero.title = value })} multiline /><TextField label="Introductietekst" value={site.hero.text} onChange={(value) => updateSite((next) => { next.hero.text = value })} multiline /><div className="field-grid"><TextField label="Eerste knop" value={site.hero.primaryLabel} onChange={(value) => updateSite((next) => { next.hero.primaryLabel = value })} /><TextField label="Tweede knop" value={site.hero.secondaryLabel} onChange={(value) => updateSite((next) => { next.hero.secondaryLabel = value })} /></div></>}
+                    {block.key === 'intro' && <><ImageField image={site.intro.image} token={token} label="Foto bij Over ons" ratioLabel="16:9 breed" onEdit={() => setCropTarget('intro')} onRemove={() => setManagedImage('intro')} onAltChange={(value) => updateSite((next) => { if (next.intro.image) next.intro.image.alt = value })} /><TextField label="Kleine bovenregel" value={site.intro.eyebrow} onChange={(value) => updateSite((next) => { next.intro.eyebrow = value })} /><TextField label="Titel" value={site.intro.title} onChange={(value) => updateSite((next) => { next.intro.title = value })} multiline /><TextField label="Tekst" value={site.intro.text} onChange={(value) => updateSite((next) => { next.intro.text = value })} multiline /></>}
                     {block.key === 'services' && <div className="service-edit-list">{site.services.map((service, index) => <div className="service-edit-card" key={index}><span>Dienst {index + 1}</span><div className="field-grid service-fields"><TextField label="Nummer" value={service.number} onChange={(value) => updateSite((next) => { next.services[index].number = value })} /><TextField label="Titel" value={service.title} onChange={(value) => updateSite((next) => { next.services[index].title = value })} /></div><TextField label="Tekst" value={service.text} onChange={(value) => updateSite((next) => { next.services[index].text = value })} multiline /></div>)}</div>}
-                    {block.key === 'project' && <><ImageField image={site.project.image} label="Projectfoto" ratioLabel="4:3 liggend" onEdit={() => setCropTarget('project')} onRemove={() => setManagedImage('project')} onAltChange={(value) => updateSite((next) => { if (next.project.image) next.project.image.alt = value })} /><TextField label="Kleine bovenregel" value={site.project.eyebrow} onChange={(value) => updateSite((next) => { next.project.eyebrow = value })} /><TextField label="Titel" value={site.project.title} onChange={(value) => updateSite((next) => { next.project.title = value })} multiline /><TextField label="Tekst" value={site.project.text} onChange={(value) => updateSite((next) => { next.project.text = value })} multiline /></>}
+                    {block.key === 'project' && <><ImageField image={site.project.image} token={token} label="Projectfoto" ratioLabel="4:3 liggend" onEdit={() => setCropTarget('project')} onRemove={() => setManagedImage('project')} onAltChange={(value) => updateSite((next) => { if (next.project.image) next.project.image.alt = value })} /><TextField label="Kleine bovenregel" value={site.project.eyebrow} onChange={(value) => updateSite((next) => { next.project.eyebrow = value })} /><TextField label="Titel" value={site.project.title} onChange={(value) => updateSite((next) => { next.project.title = value })} multiline /><TextField label="Tekst" value={site.project.text} onChange={(value) => updateSite((next) => { next.project.text = value })} multiline /></>}
                     {block.key === 'contact' && <><TextField label="Kleine bovenregel" value={site.contact.eyebrow} onChange={(value) => updateSite((next) => { next.contact.eyebrow = value })} /><TextField label="Titel" value={site.contact.title} onChange={(value) => updateSite((next) => { next.contact.title = value })} multiline /><TextField label="Tekst" value={site.contact.text} onChange={(value) => updateSite((next) => { next.contact.text = value })} multiline /></>}
                     <div className="block-save-row"><span>{isDirty(block.key) ? 'Bewaar dit blok om later te kunnen publiceren.' : 'Dit blok is opgeslagen.'}</span><button className="block-save-button" onClick={() => saveBlock(block.key)} disabled={!isDirty(block.key)}><Save size={17} /> OPSLAAN</button></div>
                   </div>
@@ -471,7 +512,7 @@ export default function AdminEditor() {
 
         <aside className="cms-preview-pane">
           <div className="preview-toolbar"><span><Eye size={16} /> Live voorbeeld</span><div><button className={viewport === 'desktop' ? 'active' : ''} onClick={() => setViewport('desktop')} aria-label="Desktopvoorbeeld"><Monitor size={17} /></button><button className={viewport === 'mobile' ? 'active' : ''} onClick={() => setViewport('mobile')} aria-label="Mobiel voorbeeld"><Smartphone size={17} /></button></div></div>
-          <div className="preview-canvas"><SitePreview site={site} viewport={viewport} /></div>
+          <div className="preview-canvas"><SitePreview site={site} viewport={viewport} token={token} /></div>
         </aside>
       </div>
 
