@@ -17,7 +17,7 @@ import {
   Undo2,
   X,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react'
 
 type Service = { number: string; title: string; text: string }
 type ManagedImage = { src: string; original: string; alt: string }
@@ -80,17 +80,20 @@ function canvasToBlob(canvas: HTMLCanvasElement, quality = .88) {
   })
 }
 
+function cropMetrics(image: HTMLImageElement, rotation: number, outputWidth: number, outputHeight: number, zoom: number) {
+  const quarterTurn = rotation % 180 !== 0
+  const rotatedWidth = quarterTurn ? image.naturalHeight : image.naturalWidth
+  const rotatedHeight = quarterTurn ? image.naturalWidth : image.naturalHeight
+  const scale = Math.max(outputWidth / rotatedWidth, outputHeight / rotatedHeight) * zoom
+  return { scale, drawnWidth: rotatedWidth * scale, drawnHeight: rotatedHeight * scale }
+}
+
 function drawCrop(canvas: HTMLCanvasElement, image: HTMLImageElement, aspect: number, zoom: number, x: number, y: number, rotation: number, outputWidth: number) {
   const outputHeight = Math.round(outputWidth / aspect)
   canvas.width = outputWidth; canvas.height = outputHeight
   const context = canvas.getContext('2d')
   if (!context) return
-  const quarterTurn = rotation % 180 !== 0
-  const rotatedWidth = quarterTurn ? image.naturalHeight : image.naturalWidth
-  const rotatedHeight = quarterTurn ? image.naturalWidth : image.naturalHeight
-  const scale = Math.max(outputWidth / rotatedWidth, outputHeight / rotatedHeight) * zoom
-  const drawnWidth = rotatedWidth * scale
-  const drawnHeight = rotatedHeight * scale
+  const { scale, drawnWidth, drawnHeight } = cropMetrics(image, rotation, outputWidth, outputHeight, zoom)
   const offsetX = (x / 100) * Math.max(0, drawnWidth - outputWidth) / 2
   const offsetY = (y / 100) * Math.max(0, drawnHeight - outputHeight) / 2
   context.fillStyle = '#101820'; context.fillRect(0, 0, outputWidth, outputHeight)
@@ -118,11 +121,12 @@ async function makeOriginal(image: HTMLImageElement, rotation: number) {
   return canvasToBlob(canvas, .9)
 }
 
-function ImageCropper({ token, label, slug, aspect, onClose, onComplete }: {
+function ImageCropper({ token, label, slug, aspect, ratioLabel, onClose, onComplete }: {
   token: string
   label: string
   slug: string
   aspect: number
+  ratioLabel: string
   onClose: () => void
   onComplete: (image: ManagedImage) => void
 }) {
@@ -136,6 +140,7 @@ function ImageCropper({ token, label, slug, aspect, onClose, onComplete }: {
   const [alt, setAlt] = useState('')
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
+  const dragRef = useRef<{ pointerId: number; clientX: number; clientY: number; x: number; y: number } | null>(null)
 
   useEffect(() => () => { if (source) URL.revokeObjectURL(source) }, [source])
   useEffect(() => {
@@ -155,6 +160,40 @@ function ImageCropper({ token, label, slug, aspect, onClose, onComplete }: {
     if (file.size > 25 * 1024 * 1024) { setError('Deze foto is groter dan 25 MB. Kies een kleinere versie.'); return }
     if (source) URL.revokeObjectURL(source)
     setSource(URL.createObjectURL(file)); setZoom(1); setX(0); setY(0); setRotation(0); setError('')
+  }
+
+  const moveCrop = (deltaClientX: number, deltaClientY: number, startX: number, startY: number) => {
+    const canvas = canvasRef.current
+    if (!canvas || !image) return
+    const rect = canvas.getBoundingClientRect()
+    const { drawnWidth, drawnHeight } = cropMetrics(image, rotation, canvas.width, canvas.height, zoom)
+    const excessX = Math.max(0, drawnWidth - canvas.width)
+    const excessY = Math.max(0, drawnHeight - canvas.height)
+    const deltaX = deltaClientX * canvas.width / rect.width
+    const deltaY = deltaClientY * canvas.height / rect.height
+    setX(excessX ? Math.max(-100, Math.min(100, startX + deltaX / (excessX / 2) * 100)) : 0)
+    setY(excessY ? Math.max(-100, Math.min(100, startY + deltaY / (excessY / 2) * 100)) : 0)
+  }
+
+  const startDrag = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (!image) return
+    event.currentTarget.setPointerCapture(event.pointerId)
+    dragRef.current = { pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY, x, y }
+  }
+
+  const dragCrop = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const start = dragRef.current
+    if (!start || start.pointerId !== event.pointerId) return
+    moveCrop(event.clientX - start.clientX, event.clientY - start.clientY, start.x, start.y)
+  }
+
+  const stopDrag = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null
+  }
+
+  const zoomCrop = (event: ReactWheelEvent<HTMLCanvasElement>) => {
+    event.preventDefault()
+    setZoom((value) => Math.max(1, Math.min(3, value - event.deltaY * .0025)))
   }
 
   const upload = async (path: string, content: string, message: string) => {
@@ -191,16 +230,22 @@ function ImageCropper({ token, label, slug, aspect, onClose, onComplete }: {
         {!source ? (
           <label className="crop-dropzone"><ImagePlus size={34} /><strong>Kies een foto</strong><span>JPG, PNG of WebP · maximaal 25 MB</span><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => chooseFile(event.target.files?.[0])} /></label>
         ) : (
-          <>
-            <div className="crop-stage" style={{ aspectRatio: String(aspect) }}><canvas ref={canvasRef} /></div>
-            <div className="crop-controls">
-              <label><span>Inzoomen</span><input type="range" min="1" max="3" step=".01" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} /></label>
-              <label><span>Links / rechts</span><input type="range" min="-100" max="100" value={x} onChange={(event) => setX(Number(event.target.value))} /></label>
-              <label><span>Omhoog / omlaag</span><input type="range" min="-100" max="100" value={y} onChange={(event) => setY(Number(event.target.value))} /></label>
-              <div className="rotate-row"><span>Draaien</span><button onClick={() => setRotation((value) => (value + 270) % 360)}>↶ 90°</button><button onClick={() => setRotation((value) => (value + 90) % 360)}>↷ 90°</button><label className="replace-file">Andere foto<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => chooseFile(event.target.files?.[0])} /></label></div>
-              <TextField label="Beschrijving voor toegankelijkheid" value={alt} onChange={setAlt} />
+          <div className="crop-main">
+            <div className="crop-visual">
+              <div className="crop-stage" style={{ aspectRatio: String(aspect), maxWidth: `calc((100vh - 235px) * ${aspect})` }}>
+                <canvas ref={canvasRef} onPointerDown={startDrag} onPointerMove={dragCrop} onPointerUp={stopDrag} onPointerCancel={stopDrag} onWheel={zoomCrop} />
+                <div className="crop-grid" aria-hidden="true" />
+                <span className="crop-hint">Sleep de foto · scroll of knijp om te zoomen</span>
+              </div>
             </div>
-          </>
+            <aside className="crop-controls">
+              <div className="crop-setting"><div><strong>Uitsnede</strong><span>Alles binnen het kader wordt bewaard.</span></div><b>{ratioLabel}</b></div>
+              <label><span>Zoom</span><strong>{Math.round(zoom * 100)}%</strong><input type="range" min="1" max="3" step=".01" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} /></label>
+              <div className="rotate-row"><span>Draaien</span><button onClick={() => setRotation((value) => (value + 270) % 360)}>↶ 90°</button><button onClick={() => setRotation((value) => (value + 90) % 360)}>↷ 90°</button></div>
+              <TextField label="Beschrijving voor toegankelijkheid" value={alt} onChange={setAlt} />
+              <label className="replace-file"><ImagePlus size={16} /> Andere foto kiezen<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => chooseFile(event.target.files?.[0])} /></label>
+            </aside>
+          </div>
         )}
         {error && <p className="crop-error">{error}</p>}
         <footer><span>Het origineel wordt eveneens bewaard, zodat je later opnieuw kunt uitsnijden.</span><button className="crop-apply" onClick={apply} disabled={!image || !alt.trim() || uploading}>{uploading ? <LoaderCircle className="spin" size={17} /> : <Check size={17} />}{uploading ? 'Foto opslaan…' : 'Uitsnede toepassen'}</button></footer>
