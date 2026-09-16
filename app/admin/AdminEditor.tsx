@@ -81,6 +81,29 @@ function canvasToBlob(canvas: HTMLCanvasElement, quality = .88) {
   })
 }
 
+function CmsImage({ src, alt = '', className }: { src: string; alt?: string; className?: string }) {
+  const [attempt, setAttempt] = useState(0)
+  const retryTimer = useRef<number | null>(null)
+
+  useEffect(() => {
+    setAttempt(0)
+    return () => {
+      if (retryTimer.current) window.clearTimeout(retryTimer.current)
+    }
+  }, [src])
+
+  const retry = () => {
+    if (attempt >= 20 || retryTimer.current) return
+    retryTimer.current = window.setTimeout(() => {
+      retryTimer.current = null
+      setAttempt((value) => value + 1)
+    }, 3000)
+  }
+
+  const separator = src.includes('?') ? '&' : '?'
+  return <img className={className} src={`${src}${separator}cmsRetry=${attempt}`} alt={alt} onError={retry} />
+}
+
 async function makeOriginal(image: HTMLImageElement, rotation: number) {
   const quarterTurn = rotation % 180 !== 0
   const sourceWidth = quarterTurn ? image.naturalHeight : image.naturalWidth
@@ -109,7 +132,7 @@ function ImageCropper({ token, label, slug, aspect, ratioLabel, existingImage, o
 }) {
   const cropperRef = useRef<ReactCropperElement>(null)
   const objectUrlRef = useRef('')
-  const [source, setSource] = useState(existingImage?.original || '')
+  const [source, setSource] = useState(existingImage?.original ? `${existingImage.original}?cmsCrop=${Date.now()}` : '')
   const [zoom, setZoom] = useState(1)
   const [minZoom, setMinZoom] = useState(.1)
   const [rotation, setRotation] = useState(0)
@@ -238,7 +261,7 @@ function ImageField({ image, label, ratioLabel, onEdit, onRemove, onAltChange }:
   return (
     <div className="image-field">
       <div className="image-field-heading"><div><strong>{label}</strong><span>Aanbevolen uitsnede: {ratioLabel}</span></div>{image?.src && <button className="remove-image" onClick={onRemove}><Trash2 size={15} /> Verwijderen</button>}</div>
-      {image?.src ? <><div className="current-image"><img src={image.src} alt="" /><button onClick={onEdit}><ImagePlus size={17} /> Foto vervangen of opnieuw uitsnijden</button></div><TextField label="Beschrijving voor toegankelijkheid" value={image.alt} onChange={onAltChange} /></> : <button className="add-image" onClick={onEdit}><ImagePlus size={22} /><span><strong>Foto toevoegen</strong><small>Uploaden, zoomen en uitsnijden</small></span></button>}
+      {image?.src ? <><div className="current-image"><CmsImage src={image.src} alt="" /><button onClick={onEdit}><ImagePlus size={17} /> Foto vervangen of opnieuw uitsnijden</button></div><TextField label="Beschrijving voor toegankelijkheid" value={image.alt} onChange={onAltChange} /></> : <button className="add-image" onClick={onEdit}><ImagePlus size={22} /><span><strong>Foto toevoegen</strong><small>Uploaden, zoomen en uitsnijden</small></span></button>}
     </div>
   )
 }
@@ -290,12 +313,12 @@ function SitePreview({ site, viewport }: { site: SiteContent; viewport: Viewport
       <div className="preview-site-header"><strong>{site.company.name}</strong><span>Over ons&nbsp;&nbsp; Diensten&nbsp;&nbsp; Project&nbsp;&nbsp; Contact</span></div>
       <section className="preview-hero">
         <div><small>{site.hero.eyebrow}</small><h1>{site.hero.title}</h1><p>{site.hero.text}</p><button>{site.hero.primaryLabel}</button></div>
-        <aside className={site.hero.image?.src ? 'with-image' : ''}>{site.hero.image?.src && <img src={site.hero.image.src} alt="" />}<b>01</b><strong>{site.company.tagline}</strong></aside>
+        <aside className={site.hero.image?.src ? 'with-image' : ''}>{site.hero.image?.src && <CmsImage src={site.hero.image.src} />}<b>01</b><strong>{site.company.tagline}</strong></aside>
       </section>
       <div className="preview-ticker">STRATEGIE • ONTWERP • ONTWIKKELING • OPVOLGING</div>
-      <section className={`preview-intro ${site.intro.image?.src ? 'with-image' : ''}`}>{site.intro.image?.src && <img src={site.intro.image.src} alt="" />}<div><small>{site.intro.eyebrow}</small><h2>{site.intro.title}</h2><p>{site.intro.text}</p></div></section>
+      <section className={`preview-intro ${site.intro.image?.src ? 'with-image' : ''}`}>{site.intro.image?.src && <CmsImage src={site.intro.image.src} />}<div><small>{site.intro.eyebrow}</small><h2>{site.intro.title}</h2><p>{site.intro.text}</p></div></section>
       <section className="preview-services"><small>ONZE AANPAK</small><h2>Van richting naar resultaat.</h2>{site.services.map((service) => <div key={service.number}><b>{service.number}</b><strong>{service.title}</strong><span>{service.text}</span></div>)}</section>
-      <section className="preview-project"><div className={site.project.image?.src ? 'with-image' : ''}>{site.project.image?.src ? <img src={site.project.image.src} alt="" /> : 'CASE STUDY'}</div><article><small>{site.project.eyebrow}</small><h2>{site.project.title}</h2><p>{site.project.text}</p></article></section>
+      <section className="preview-project"><div className={site.project.image?.src ? 'with-image' : ''}>{site.project.image?.src ? <CmsImage src={site.project.image.src} /> : 'CASE STUDY'}</div><article><small>{site.project.eyebrow}</small><h2>{site.project.title}</h2><p>{site.project.text}</p></article></section>
       <section className="preview-contact"><small>{site.contact.eyebrow}</small><h2>{site.contact.title}</h2><p>{site.contact.text}</p><strong>{site.company.email}<br />{site.company.phone}</strong></section>
     </div>
   )
