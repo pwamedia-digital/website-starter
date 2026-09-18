@@ -245,3 +245,57 @@ PAS DAARNA:
 → AANMAAK CMS
 
 Geen code vóór dit beslismoment, tenzij PWAMEDIA expliciet vraagt het concept meteen uit te werken.
+
+
+---
+
+# VERPLICHTE PWAMEDIA CMS-BEVEILIGINGSSTANDAARD
+
+Deze beveiligingsstandaard geldt voor ELK CMS dat PWAMEDIA genereert of oplevert. Een CMS is niet productie-klaar zolang deze laag niet actief en getest is.
+
+## Authenticatie
+- Klant logt in met e-mailadres + wachtwoord.
+- 2FA via TOTP/authenticator-app is verplicht.
+- Bij 2FA-activatie worden eenmalige recoverycodes gegenereerd.
+- Sessies worden server-side beheerd.
+- Geen publieke self-registration in productie. Accounts worden gecontroleerd/provisioned door PWAMEDIA.
+- Wachtwoorden worden nooit zelf in plaintext opgeslagen of door PWAMEDIA-code zelf gehasht; gebruik de gekozen, onderhouden auth-laag.
+- Rate limiting / lockout voor herhaalde mislukte login- en 2FA-pogingen.
+- Veilige logout, sessieverval en recoveryflow moeten getest worden.
+
+## Architectuur
+- Gebruik dezelfde beveiligingsarchitectuur als het PWAMEDIA Dashboard: Better Auth + PostgreSQL/Neon + server-side endpoints, tenzij PWAMEDIA later expliciet een nieuwe standaard vastlegt.
+- Iedere klant/CMS krijgt logisch gescheiden authenticatie en data. Geen klant mag toegang kunnen krijgen tot data, sessies of beheerfuncties van een andere klant.
+- GitHub-, Vercel-, database- en auth-secrets bestaan uitsluitend server-side.
+- Geen GitHub PAT, API-token, database-URL of auth-secret in frontendcode, browser storage of publiek repositorymateriaal.
+- Productiesecrets worden als beveiligde environment variables beheerd.
+- CMS-routes én alle muterende API-routes worden server-side geautoriseerd. Een verborgen /admin-URL is geen beveiliging.
+
+## Rollen
+Voorzie minimaal:
+- PWAMEDIA beheer/recovery
+- Klantbeheerder
+
+Later kunnen aanvullende rollen/rechten worden toegevoegd wanneer een project dat vereist.
+
+## Recovery
+- Klant krijgt recoverycodes bij 2FA-configuratie.
+- PWAMEDIA beschikt over een gecontroleerde admin/recoveryprocedure zonder het klantwachtwoord te kennen.
+- Recovery mag 2FA niet stilzwijgend omzeilen zonder verificatie/audit.
+
+## Productiecheck
+Voor ieder CMS vóór go-live:
+1. login met correct en fout wachtwoord testen;
+2. verplichte 2FA testen;
+3. recoverycode testen;
+4. logout en sessieverval testen;
+5. ongeautoriseerde /admin- en API-toegang testen;
+6. controleren dat secrets niet in frontend/build/GitHub voorkomen;
+7. noindex/nofollow voor CMS behouden;
+8. controleren dat alleen de juiste klant tot het juiste CMS/data toegang heeft.
+
+## PWAMEDIA-regel
+AANMAAK CMS betekent voortaan automatisch:
+CMS bouwen → beveiligde auth aansluiten → klantaccount → verplichte 2FA → recoverycodes → PWAMEDIA recovery/admin → securitytest → pas daarna opleveren.
+
+Een tijdelijke client-side login, gedeeld wachtwoord of rechtstreeks GitHub-token in het CMS is NOOIT een productie-oplossing.
